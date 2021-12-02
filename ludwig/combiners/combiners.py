@@ -1,5 +1,4 @@
 #! /usr/bin/env python
-# coding=utf-8
 # Copyright (c) 2019 Uber Technologies, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,49 +13,41 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from abc import ABC
 import logging
+from abc import ABC
 from functools import lru_cache
-from typing import List, Dict, Optional, Union, Any
-
-from marshmallow import INCLUDE
-from marshmallow_dataclass import dataclass
+from typing import Any, Dict, List, Optional, Union
 
 import torch
-from torch.nn import ModuleList, Linear
-
-from ludwig.utils.registry import Registry
-from ludwig.utils.torch_utils import LudwigModule, \
-    sequence_mask as torch_sequence_mask
+from marshmallow import INCLUDE
+from marshmallow_dataclass import dataclass
+from torch.nn import Linear, ModuleList
 
 import ludwig.utils.schema_utils as schema
-from ludwig.constants import NUMERICAL, BINARY
-from ludwig.encoders.sequence_encoders import ParallelCNN
-from ludwig.encoders.sequence_encoders import StackedCNN
-from ludwig.encoders.sequence_encoders import StackedCNNRNN
-from ludwig.encoders.sequence_encoders import StackedParallelCNN
-from ludwig.encoders.sequence_encoders import StackedRNN
+from ludwig.constants import BINARY, NUMERICAL
+from ludwig.encoders.sequence_encoders import ParallelCNN, StackedCNN, StackedCNNRNN, StackedParallelCNN, StackedRNN
+from ludwig.features.base_feature import InputFeature
 from ludwig.modules.attention_modules import TransformerStack
 from ludwig.modules.embedding_modules import Embed
 from ludwig.modules.fully_connected_modules import FCStack
 from ludwig.modules.reduction_modules import SequenceReducer
 from ludwig.modules.tabnet_modules import TabNet
 from ludwig.utils.misc_utils import get_from_registry
-from ludwig.utils.torch_utils import sequence_length_3D
+from ludwig.utils.registry import Registry
+from ludwig.utils.torch_utils import LudwigModule, sequence_length_3D
+from ludwig.utils.torch_utils import sequence_mask as torch_sequence_mask
 
 logger = logging.getLogger(__name__)
 
-
 sequence_encoder_registry = {
-    'stacked_cnn': StackedCNN,
-    'parallel_cnn': ParallelCNN,
-    'stacked_parallel_cnn': StackedParallelCNN,
-    'rnn': StackedRNN,
-    'cnnrnn': StackedCNNRNN,
+    "stacked_cnn": StackedCNN,
+    "parallel_cnn": ParallelCNN,
+    "stacked_parallel_cnn": StackedParallelCNN,
+    "rnn": StackedRNN,
+    "cnnrnn": StackedCNNRNN,
     # todo: add transformer
     # 'transformer': StackedTransformer,
 }
-
 
 combiner_registry = Registry()
 
@@ -65,6 +56,7 @@ def register_combiner(name: str):
     def wrap(cls):
         combiner_registry[name] = cls
         return cls
+
     return wrap
 
 
@@ -78,9 +70,7 @@ class Combiner(LudwigModule, ABC):
     def concatenated_shape(self) -> torch.Size:
         # compute the size of the last dimension for the incoming encoder outputs
         # this is required to setup the fully connected layer
-        shapes = [
-            torch.prod(torch.Tensor([*self.input_features[k].output_shape]))
-            for k in self.input_features]
+        shapes = [torch.prod(torch.Tensor([*self.input_features[k].output_shape])) for k in self.input_features]
         return torch.Size([torch.sum(torch.Tensor(shapes)).type(torch.int32)])
 
     @property
@@ -88,8 +78,7 @@ class Combiner(LudwigModule, ABC):
         # input to combiner is a dictionary of the input features encoder
         # outputs, this property returns dictionary of output shapes for each
         # input feature's encoder output shapes.
-        return {k: self.input_features[k].output_shape
-                for k in self.input_features}
+        return {k: self.input_features[k].output_shape for k in self.input_features}
 
     @property
     @lru_cache(maxsize=1)
@@ -97,13 +86,10 @@ class Combiner(LudwigModule, ABC):
         pseudo_input = {}
         for k in self.input_features:
             pseudo_input[k] = {
-                'encoder_output': torch.rand(
-                    2, *self.input_features[k].output_shape,
-                    dtype=self.input_dtype
-                )
+                "encoder_output": torch.rand(2, *self.input_features[k].output_shape, dtype=self.input_dtype)
             }
         output_tensor = self.forward(pseudo_input)
-        return output_tensor['combiner_output'].size()[1:]
+        return output_tensor["combiner_output"].size()[1:]
 
 
 @dataclass
@@ -112,11 +98,11 @@ class ConcatCombinerConfig:
     num_fc_layers: int = schema.NonNegativeInteger(default=0)
     fc_size: int = schema.PositiveInteger(default=256)
     use_bias: bool = True
-    weights_initializer: Union[str, Dict] = schema.InitializerOrDict(default='xavier_uniform')
-    bias_initializer: Union[str, Dict] = schema.InitializerOrDict(default='zeros')
-    norm: Optional[str] = schema.StringOptions(['batch', 'layer'])
+    weights_initializer: Union[str, Dict] = schema.InitializerOrDict(default="xavier_uniform")
+    bias_initializer: Union[str, Dict] = schema.InitializerOrDict(default="zeros")
+    norm: Optional[str] = schema.StringOptions(["batch", "layer"])
     norm_params: Optional[dict] = schema.Dict()
-    activation: str = 'relu'
+    activation: str = "relu"
     dropout: float = schema.FloatRange(default=0.0, min=0, max=1)
     flatten_inputs: bool = False
     residual: bool = False
@@ -125,17 +111,12 @@ class ConcatCombinerConfig:
         unknown = INCLUDE
 
 
-@register_combiner(name='concat')
+@register_combiner(name="concat")
 class ConcatCombiner(Combiner):
-    def __init__(
-            self,
-            input_features: Dict[str, "InputFeature"] = None,
-            config: ConcatCombinerConfig = None,
-            **kwargs
-    ):
+    def __init__(self, input_features: Dict[str, "InputFeature"] = None, config: ConcatCombinerConfig = None, **kwargs):
         super().__init__(input_features)
         self.name = "ConcatCombiner"
-        logger.debug(' {}'.format(self.name))
+        logger.debug(f" {self.name}")
 
         self.flatten_inputs = config.flatten_inputs
         self.fc_stack = None
@@ -145,11 +126,11 @@ class ConcatCombiner(Combiner):
         if fc_layers is None and config.num_fc_layers is not None:
             fc_layers = []
             for i in range(config.num_fc_layers):
-                fc_layers.append({'fc_size': config.fc_size})
+                fc_layers.append({"fc_size": config.fc_size})
 
         self.fc_layers = fc_layers
         if self.fc_layers is not None:
-            logger.debug('  FCStack')
+            logger.debug("  FCStack")
             self.fc_stack = FCStack(
                 first_layer_input_size=self.concatenated_shape[-1],
                 layers=config.fc_layers,
@@ -168,18 +149,13 @@ class ConcatCombiner(Combiner):
         if input_features and len(input_features) == 1 and self.fc_layers is None:
             self.supports_masking = True
 
-    def forward(
-            self,
-            inputs: Dict  # encoder outputs
-    ) -> Dict:
-        encoder_outputs = [inputs[k]['encoder_output'] for k in inputs]
+    def forward(self, inputs: Dict) -> Dict:  # encoder outputs
+        encoder_outputs = [inputs[k]["encoder_output"] for k in inputs]
 
         # ================ Flatten ================
         if self.flatten_inputs:
             batch_size = encoder_outputs[0].shape[0]
-            encoder_outputs = [
-                torch.reshape(eo, [batch_size, -1]) for eo in encoder_outputs
-            ]
+            encoder_outputs = [torch.reshape(eo, [batch_size, -1]) for eo in encoder_outputs]
 
         # ================ Concat ================
         if len(encoder_outputs) > 1:
@@ -191,11 +167,15 @@ class ConcatCombiner(Combiner):
         if self.fc_stack is not None:
             hidden = self.fc_stack(hidden)
 
-        return_data = {'combiner_output': hidden}
+        return_data = {"combiner_output": hidden}
 
         if len(inputs) == 1:
+            # Workaround for including additional tensors from output of input encoders for
+            # potential use in decoders, e.g. LSTM state for seq2seq.
+            # TODO(Justin): Think about how to make this communication work for multi-sequence
+            # features. Other combiners.
             for key, value in [d for d in inputs.values()][0].items():
-                if key != 'encoder_output':
+                if key != "encoder_output":
                     return_data[key] = value
 
         return return_data
@@ -214,21 +194,17 @@ class SequenceConcatCombinerConfig:
         unknown = INCLUDE
 
 
-@register_combiner(name='sequence_concat')
+@register_combiner(name="sequence_concat")
 class SequenceConcatCombiner(Combiner):
     def __init__(
-            self,
-            input_features: Dict[str, "InputFeature"],
-            config: SequenceConcatCombinerConfig = None,
-            **kwargs
+        self, input_features: Dict[str, "InputFeature"], config: SequenceConcatCombinerConfig = None, **kwargs
     ):
         super().__init__(input_features)
-        self.name = 'SequenceConcatCombiner'
-        logger.debug(' {}'.format(self.name))
+        self.name = "SequenceConcatCombiner"
+        logger.debug(f" {self.name}")
 
         self.reduce_output = config.reduce_output
-        self.reduce_sequence = SequenceReducer(
-            reduce_mode=config.reduce_output)
+        self.reduce_sequence = SequenceReducer(reduce_mode=config.reduce_output)
         if self.reduce_output is None:
             self.supports_masking = True
         self.main_sequence_feature = config.main_sequence_feature
@@ -247,37 +223,29 @@ class SequenceConcatCombiner(Combiner):
                 seq_size = self.input_features[k].output_shape[0]
                 break
         if not seq_size:
-            raise ValueError(
-                'At least one of the input features for SequenceConcatCombiner should be a sequence.')
+            raise ValueError("At least one of the input features for SequenceConcatCombiner should be a sequence.")
 
         # collect the size of the last dimension for all input feature
         # encoder outputs
-        shapes = [self.input_features[k].output_shape[-1] for k in
-                  self.input_features]  # output shape not input shape
+        shapes = [self.input_features[k].output_shape[-1] for k in self.input_features]  # output shape not input shape
         return torch.Size([seq_size, sum(shapes)])
 
-    def forward(
-            self,
-            inputs: Dict  # encoder outputs
-    ) -> Dict:
-        if (self.main_sequence_feature is None or
-                self.main_sequence_feature not in inputs):
+    def forward(self, inputs: Dict) -> Dict:  # encoder outputs
+        if self.main_sequence_feature is None or self.main_sequence_feature not in inputs:
             for if_name, if_outputs in inputs.items():
                 # todo: when https://github.com/ludwig-ai/ludwig/issues/810 is closed
                 #       convert following test from using shape to use explicit
                 #       if_outputs[TYPE] values for sequence features
-                if len(if_outputs['encoder_output'].shape) == 3:
+                if len(if_outputs["encoder_output"].shape) == 3:
                     self.main_sequence_feature = if_name
                     break
 
         if self.main_sequence_feature is None:
-            raise Exception(
-                'No sequence feature available for sequence combiner'
-            )
+            raise Exception("No sequence feature available for sequence combiner")
 
         main_sequence_feature_encoding = inputs[self.main_sequence_feature]
 
-        representation = main_sequence_feature_encoding['encoder_output']
+        representation = main_sequence_feature_encoding["encoder_output"]
         representations = [representation]
 
         sequence_max_length = representation.shape[1]
@@ -286,7 +254,7 @@ class SequenceConcatCombiner(Combiner):
         # ================ Concat ================
         for if_name, if_outputs in inputs.items():
             if if_name != self.main_sequence_feature:
-                if_representation = if_outputs['encoder_output']
+                if_representation = if_outputs["encoder_output"]
                 if len(if_representation.shape) == 3:
                     # The following check makes sense when
                     # both representations have a specified
@@ -306,16 +274,16 @@ class SequenceConcatCombiner(Combiner):
                     # features have different lengths for some data points.
                     if if_representation.shape[1] != representation.shape[1]:
                         raise ValueError(
-                            'The sequence length of the input feature {} '
-                            'is {} and is different from the sequence '
-                            'length of the main sequence feature {} which '
-                            'is {}.\n Shape of {}: {}, shape of {}: {}.\n'
-                            'Sequence lengths of all sequential features '
-                            'must be the same  in order to be concatenated '
-                            'by the sequence concat combiner. '
-                            'Try to impose the same max sequence length '
-                            'as a preprocessing parameter to both features '
-                            'or to reduce the output of {}.'.format(
+                            "The sequence length of the input feature {} "
+                            "is {} and is different from the sequence "
+                            "length of the main sequence feature {} which "
+                            "is {}.\n Shape of {}: {}, shape of {}: {}.\n"
+                            "Sequence lengths of all sequential features "
+                            "must be the same  in order to be concatenated "
+                            "by the sequence concat combiner. "
+                            "Try to impose the same max sequence length "
+                            "as a preprocessing parameter to both features "
+                            "or to reduce the output of {}.".format(
                                 if_name,
                                 if_representation.shape[1],
                                 self.main_sequence_feature,
@@ -324,7 +292,7 @@ class SequenceConcatCombiner(Combiner):
                                 if_representation.shape,
                                 if_name,
                                 representation.shape,
-                                if_name
+                                if_name,
                             )
                         )
                     # this assumes all sequence representations have the
@@ -333,44 +301,32 @@ class SequenceConcatCombiner(Combiner):
 
                 elif len(if_representation.shape) == 2:
                     multipliers = (1, sequence_max_length, 1)
-                    tiled_representation = torch.tile(
-                        torch.unsqueeze(if_representation, 1),
-                        multipliers
-                    )
+                    tiled_representation = torch.tile(torch.unsqueeze(if_representation, 1), multipliers)
                     representations.append(tiled_representation)
 
                 else:
                     raise ValueError(
-                        'The representation of {} has rank {} and cannot be'
-                        ' concatenated by a sequence concat combiner. '
-                        'Only rank 2 and rank 3 tensors are supported.'.format(
-                            if_name,
-                            len(if_representation.shape)
-                        )
+                        "The representation of {} has rank {} and cannot be"
+                        " concatenated by a sequence concat combiner. "
+                        "Only rank 2 and rank 3 tensors are supported.".format(if_name, len(if_representation.shape))
                     )
 
         hidden = torch.cat(representations, 2)
-        logger.debug('  concat_hidden: {0}'.format(hidden))
+        logger.debug(f"  concat_hidden: {hidden}")
 
         # ================ Mask ================
         # todo future: maybe modify this with TF2 mask mechanics
-        sequence_mask = torch_sequence_mask(
-            sequence_length,
-            sequence_max_length
-        )
-        hidden = torch.multiply(
-            hidden,
-            torch.unsqueeze(sequence_mask, -1).type(torch.float32)
-        )
+        sequence_mask = torch_sequence_mask(sequence_length, sequence_max_length)
+        hidden = torch.multiply(hidden, torch.unsqueeze(sequence_mask, -1).type(torch.float32))
 
         # ================ Reduce ================
         hidden = self.reduce_sequence(hidden)
 
-        return_data = {'combiner_output': hidden}
+        return_data = {"combiner_output": hidden}
 
         if len(inputs) == 1:
             for key, value in [d for d in inputs.values()][0].items():
-                if key != 'encoder_output':
+                if key != "encoder_output":
                     return_data[key] = value
 
         return return_data
@@ -384,49 +340,37 @@ class SequenceConcatCombiner(Combiner):
 class SequenceCombinerConfig:
     main_sequence_feature: Optional[str] = None
     reduce_output: Optional[str] = schema.ReductionOptions()
-    encoder: Optional[str] = schema.StringOptions(
-        list(sequence_encoder_registry.keys()))
+    encoder: Optional[str] = schema.StringOptions(list(sequence_encoder_registry.keys()))
 
     class Meta:
         unknown = INCLUDE
 
 
-@register_combiner(name='sequence')
+@register_combiner(name="sequence")
 class SequenceCombiner(Combiner):
-    def __init__(
-            self,
-            input_features: Dict[str, "InputFeature"],
-            config: SequenceCombinerConfig = None,
-            **kwargs
-    ):
+    def __init__(self, input_features: Dict[str, "InputFeature"], config: SequenceCombinerConfig = None, **kwargs):
         super().__init__(input_features)
-        self.name = 'SequenceCombiner'
-        logger.debug(' {}'.format(self.name))
+        self.name = "SequenceCombiner"
+        logger.debug(f" {self.name}")
 
         self.combiner = SequenceConcatCombiner(
             input_features,
-            config=SequenceConcatCombinerConfig(
-                reduce_output=None,
-                main_sequence_feature=config.main_sequence_feature
-            )
+            config=SequenceConcatCombinerConfig(reduce_output=None, main_sequence_feature=config.main_sequence_feature),
         )
 
         logger.debug(
-            f'combiner input shape {self.combiner.concatenated_shape}, '
-            f'output shape {self.combiner.output_shape}'
+            f"combiner input shape {self.combiner.concatenated_shape}, " f"output shape {self.combiner.output_shape}"
         )
 
-        self.encoder_obj = get_from_registry(
-            config.encoder, sequence_encoder_registry)(
+        self.encoder_obj = get_from_registry(config.encoder, sequence_encoder_registry)(
             should_embed=False,
             reduce_output=config.reduce_output,
             embedding_size=self.combiner.output_shape[1],
             max_sequence_length=self.combiner.output_shape[0],
-            **kwargs
+            **kwargs,
         )
 
-        if (hasattr(self.encoder_obj, 'supports_masking') and
-                self.encoder_obj.supports_masking):
+        if hasattr(self.encoder_obj, "supports_masking") and self.encoder_obj.supports_masking:
             self.supports_masking = True
 
     @property
@@ -445,23 +389,19 @@ class SequenceCombiner(Combiner):
 
         # collect the size of the last dimension for all input feature
         # encoder outputs
-        shapes = [self.input_features[k].output_shape[-1] for k in
-                  self.input_features]  # output shape not input shape
+        shapes = [self.input_features[k].output_shape[-1] for k in self.input_features]  # output shape not input shape
         return torch.Size([seq_size, sum(shapes)])
 
-    def forward(
-            self,
-            inputs: Dict  # encoder outputs
-    ) -> Dict:
+    def forward(self, inputs: Dict) -> Dict:  # encoder outputs
         # ================ Concat ================
         hidden = self.combiner(inputs)
 
         # ================ Sequence encoding ================
-        hidden = self.encoder_obj(hidden['combiner_output'])
+        hidden = self.encoder_obj(hidden["combiner_output"])
 
-        return_data = {'combiner_output': hidden['encoder_output']}
+        return_data = {"combiner_output": hidden["encoder_output"]}
         for key, value in hidden.items():
-            if key != 'encoder_output':
+            if key != "encoder_output":
                 return_data[key] = value
 
         return return_data
@@ -475,8 +415,7 @@ class SequenceCombiner(Combiner):
 class TabNetCombinerConfig:
     size: int = schema.PositiveInteger(default=32)  # N_a in the paper
     output_size: int = schema.PositiveInteger(default=32)  # N_d in the paper
-    num_steps: int = schema.NonNegativeInteger(
-        default=1)  # N_steps in the paper
+    num_steps: int = schema.NonNegativeInteger(default=1)  # N_steps in the paper
     num_total_blocks: int = schema.NonNegativeInteger(default=4)
     num_shared_blocks: int = schema.NonNegativeInteger(default=2)
     relaxation_factor: float = 1.5  # gamma in the paper
@@ -491,17 +430,14 @@ class TabNetCombinerConfig:
         unknown = INCLUDE
 
 
-@register_combiner(name='tabnet')
+@register_combiner(name="tabnet")
 class TabNetCombiner(Combiner):
     def __init__(
-            self,
-            input_features: Dict[str, "InputFeature"],
-            config: TabNetCombinerConfig = None,
-            **kwargs
+        self, input_features: Dict[str, "InputFeature"], config: TabNetCombinerConfig = None, **kwargs
     ) -> None:
         super().__init__(input_features)
-        self.name = 'TabNetCombiner'
-        logger.debug(' {}'.format(self.name))
+        self.name = "TabNetCombiner"
+        logger.debug(f" {self.name}")
 
         self.tabnet = TabNet(
             self.concatenated_shape[-1],
@@ -514,7 +450,7 @@ class TabNetCombiner(Combiner):
             bn_epsilon=config.bn_epsilon,
             bn_momentum=config.bn_momentum,
             bn_virtual_bs=config.bn_virtual_bs,
-            sparsity=config.sparsity
+            sparsity=config.sparsity,
         )
 
         if config.dropout > 0:
@@ -530,16 +466,14 @@ class TabNetCombiner(Combiner):
     #     }
 
     def forward(
-            self,
-            inputs: torch.Tensor,  # encoder outputs
+        self,
+        inputs: torch.Tensor,  # encoder outputs
     ) -> Dict:
-        encoder_outputs = [inputs[k]['encoder_output'] for k in inputs]
+        encoder_outputs = [inputs[k]["encoder_output"] for k in inputs]
 
         # ================ Flatten ================
         batch_size = encoder_outputs[0].shape[0]
-        encoder_outputs = [
-            torch.reshape(eo, [batch_size, -1]) for eo in encoder_outputs
-        ]
+        encoder_outputs = [torch.reshape(eo, [batch_size, -1]) for eo in encoder_outputs]
 
         # ================ Concat ================
         if len(encoder_outputs) > 1:
@@ -548,19 +482,19 @@ class TabNetCombiner(Combiner):
             hidden = list(encoder_outputs)[0]
 
         # ================ TabNet ================
-        hidden, aggregated_mask, masks = self.tabnet(
-            hidden
-        )
+        hidden, aggregated_mask, masks = self.tabnet(hidden)
         if self.dropout:
             hidden = self.dropout(hidden)
 
-        return_data = {'combiner_output': hidden,
-                       'aggregated_attention_masks': aggregated_mask,
-                       'attention_masks': masks}
+        return_data = {
+            "combiner_output": hidden,
+            "aggregated_attention_masks": aggregated_mask,
+            "attention_masks": masks,
+        }
 
         if len(inputs) == 1:
             for key, value in [d for d in inputs.values()][0].items():
-                if key != 'encoder_output':
+                if key != "encoder_output":
                     return_data[key] = value
 
         return return_data
@@ -581,52 +515,49 @@ class TransformerCombinerConfig:
     num_fc_layers: int = schema.NonNegativeInteger(default=0)
     fc_size: int = schema.PositiveInteger(default=256)
     use_bias: bool = True
-    weights_initializer: Union[str, Dict] = schema.InitializerOrDict(default='xavier_uniform')
-    bias_initializer: Union[str, Dict] = schema.InitializerOrDict(default='zeros')
-    norm: Optional[str] = schema.StringOptions(['batch', 'layer'])
+    weights_initializer: Union[str, Dict] = schema.InitializerOrDict(default="xavier_uniform")
+    bias_initializer: Union[str, Dict] = schema.InitializerOrDict(default="zeros")
+    norm: Optional[str] = schema.StringOptions(["batch", "layer"])
     norm_params: Optional[dict] = schema.Dict()
-    fc_activation: str = 'relu'
+    fc_activation: str = "relu"
     fc_dropout: float = schema.FloatRange(default=0.0, min=0, max=1)
     fc_residual: bool = False
-    reduce_output: Optional[str] = schema.ReductionOptions(default='mean')
+    reduce_output: Optional[str] = schema.ReductionOptions(default="mean")
 
     class Meta:
         unknown = INCLUDE
 
 
-@register_combiner(name='transformer')
+@register_combiner(name="transformer")
 class TransformerCombiner(Combiner):
     def __init__(
-            self,
-            input_features: Dict[str, "InputFeature"] = None,
-            config: TransformerCombinerConfig = None,
-            **kwargs
+        self, input_features: Dict[str, "InputFeature"] = None, config: TransformerCombinerConfig = None, **kwargs
     ):
         super().__init__(input_features)
-        self.name = 'TransformerCombiner'
-        logger.debug(' {}'.format(self.name))
+        self.name = "TransformerCombiner"
+        logger.debug(f" {self.name}")
 
         self.reduce_output = config.reduce_output
-        self.reduce_sequence = SequenceReducer(
-            reduce_mode=config.reduce_output)
+        self.reduce_sequence = SequenceReducer(reduce_mode=config.reduce_output)
         if self.reduce_output is None:
             self.supports_masking = True
 
         # sequence size for Transformer layer is number of input features
         self.sequence_size = len(self.input_features)
 
-        logger.debug('  Projectors')
+        logger.debug("  Projectors")
         self.projectors = ModuleList(
             # regardless of rank-2 or rank-3 input, torch.prod() calculates size
             # after flattening the encoder output tensor
-            [Linear(
-                torch.prod(
-                    torch.Tensor([*input_features[inp].output_shape])
-                ).type(torch.int32), config.hidden_size) for inp in input_features
-             ]
+            [
+                Linear(
+                    torch.prod(torch.Tensor([*input_features[inp].output_shape])).type(torch.int32), config.hidden_size
+                )
+                for inp in input_features
+            ]
         )
 
-        logger.debug('  TransformerStack')
+        logger.debug("  TransformerStack")
         self.transformer_stack = TransformerStack(
             input_size=config.hidden_size,
             sequence_size=self.sequence_size,
@@ -634,11 +565,11 @@ class TransformerCombiner(Combiner):
             num_heads=config.num_heads,
             fc_size=config.transformer_fc_size,
             num_layers=config.num_layers,
-            dropout=config.dropout
+            dropout=config.dropout,
         )
 
         if self.reduce_output is not None:
-            logger.debug('  FCStack')
+            logger.debug("  FCStack")
             self.fc_stack = FCStack(
                 self.transformer_stack.output_shape[-1],
                 layers=config.fc_layers,
@@ -655,22 +586,17 @@ class TransformerCombiner(Combiner):
             )
 
     def forward(
-            self,
-            inputs,  # encoder outputs
+        self,
+        inputs,  # encoder outputs
     ) -> Dict:
-        encoder_outputs = [inputs[k]['encoder_output'] for k in inputs]
+        encoder_outputs = [inputs[k]["encoder_output"] for k in inputs]
 
         # ================ Flatten ================
         batch_size = encoder_outputs[0].shape[0]
-        encoder_outputs = [
-            torch.reshape(eo, [batch_size, -1]) for eo in encoder_outputs
-        ]
+        encoder_outputs = [torch.reshape(eo, [batch_size, -1]) for eo in encoder_outputs]
 
         # ================ Project & Concat ================
-        projected = [
-            self.projectors[i](eo)
-            for i, eo in enumerate(encoder_outputs)
-        ]
+        projected = [self.projectors[i](eo) for i, eo in enumerate(encoder_outputs)]
         hidden = torch.stack(projected)  # shape [num_eo, bs, h]
         hidden = torch.permute(hidden, (1, 0, 2))  # shape [bs, num_eo, h]
 
@@ -684,11 +610,11 @@ class TransformerCombiner(Combiner):
             # ================ FC Layers ================
             hidden = self.fc_stack(hidden)
 
-        return_data = {'combiner_output': hidden}
+        return_data = {"combiner_output": hidden}
 
         if len(inputs) == 1:
             for key, value in [d for d in inputs.values()][0].items():
-                if key != 'encoder_output':
+                if key != "encoder_output":
                     return_data[key] = value
 
         return return_data
@@ -710,47 +636,43 @@ class TabTransformerCombinerConfig:
     num_fc_layers: int = schema.NonNegativeInteger(default=0)
     fc_size: int = schema.PositiveInteger(default=256)
     use_bias: bool = True
-    weights_initializer: Union[str, Dict] = schema.InitializerOrDict(default='xavier_uniform')
-    bias_initializer: Union[str, Dict] = schema.InitializerOrDict(default='zeros')
-    norm: Optional[str] = schema.StringOptions(['batch', 'layer'])
+    weights_initializer: Union[str, Dict] = schema.InitializerOrDict(default="xavier_uniform")
+    bias_initializer: Union[str, Dict] = schema.InitializerOrDict(default="zeros")
+    norm: Optional[str] = schema.StringOptions(["batch", "layer"])
     norm_params: Optional[dict] = schema.Dict()
-    fc_activation: str = 'relu'
+    fc_activation: str = "relu"
     fc_dropout: float = schema.FloatRange(default=0.0, min=0, max=1)
     fc_residual: bool = False
-    reduce_output: str = schema.ReductionOptions(default='concat')
+    reduce_output: str = schema.ReductionOptions(default="concat")
 
     class Meta:
         unknown = INCLUDE
 
 
-@register_combiner(name='tabtransformer')
+@register_combiner(name="tabtransformer")
 class TabTransformerCombiner(Combiner):
     def __init__(
-            self,
-            input_features: Dict[str, "InputFeature"] = None,
-            config: TabTransformerCombinerConfig = None,
-            **kwargs
+        self, input_features: Dict[str, "InputFeature"] = None, config: TabTransformerCombinerConfig = None, **kwargs
     ):
         super().__init__(input_features)
         self.name = "TabTransformerCombiner"
-        logger.debug('Initializing {}'.format(self.name))
+        logger.debug(f"Initializing {self.name}")
 
         if config.reduce_output is None:
-            raise ValueError("TabTransformer requires the `reduce_output` "
-                             "parameter")
+            raise ValueError("TabTransformer requires the `reduce_output` " "parameter")
         self.reduce_output = config.reduce_output
-        self.reduce_sequence = SequenceReducer(
-            reduce_mode=config.reduce_output)
+        self.reduce_sequence = SequenceReducer(reduce_mode=config.reduce_output)
         self.supports_masking = True
 
         self.embed_input_feature_name = config.embed_input_feature_name
         if self.embed_input_feature_name:
-            vocab = [i_f for i_f in input_features
-                     if input_features[i_f].type != NUMERICAL
-                     or input_features[i_f].type != BINARY]
-            if self.embed_input_feature_name == 'add':
-                self.embed_i_f_name_layer = Embed(vocab, config.hidden_size,
-                                                  force_embedding_size=True)
+            vocab = [
+                i_f
+                for i_f in input_features
+                if input_features[i_f].type != NUMERICAL or input_features[i_f].type != BINARY
+            ]
+            if self.embed_input_feature_name == "add":
+                self.embed_i_f_name_layer = Embed(vocab, config.hidden_size, force_embedding_size=True)
                 projector_size = config.hidden_size
             elif isinstance(self.embed_input_feature_name, int):
                 if self.embed_input_feature_name > config.hidden_size:
@@ -759,9 +681,8 @@ class TabTransformerCombiner(Combiner):
                         "`embed_input_feature_name` "
                         "specified integer value ({}) "
                         "needs to be smaller than "
-                        "`hidden_size` ({}).".format(
-                            self.embed_input_feature_name, config.hidden_size
-                        ))
+                        "`hidden_size` ({}).".format(self.embed_input_feature_name, config.hidden_size)
+                    )
                 self.embed_i_f_name_layer = Embed(
                     vocab,
                     self.embed_input_feature_name,
@@ -769,15 +690,17 @@ class TabTransformerCombiner(Combiner):
                 )
                 projector_size = config.hidden_size - self.embed_input_feature_name
             else:
-                raise ValueError("TabTransformer parameter "
-                                 "`embed_input_feature_name` "
-                                 "should be either None, an integer or `add`, "
-                                 "the current value is "
-                                 "{}".format(self.embed_input_feature_name))
+                raise ValueError(
+                    "TabTransformer parameter "
+                    "`embed_input_feature_name` "
+                    "should be either None, an integer or `add`, "
+                    "the current value is "
+                    "{}".format(self.embed_input_feature_name)
+                )
         else:
             projector_size = config.hidden_size
 
-        logger.debug('  Projectors')
+        logger.debug("  Projectors")
         self.unembeddable_features = []
         self.embeddable_features = []
         for i_f in input_features:
@@ -788,9 +711,7 @@ class TabTransformerCombiner(Combiner):
 
         self.projectors = ModuleList()
         for i_f in self.embeddable_features:
-            flatten_size = self.get_flatten_size(
-                input_features[i_f].output_shape
-            )
+            flatten_size = self.get_flatten_size(input_features[i_f].output_shape)
             self.projectors.append(Linear(flatten_size[0], projector_size))
 
         # input to layer_norm are the encoder outputs for unembeddable features,
@@ -798,13 +719,11 @@ class TabTransformerCombiner(Combiner):
         # tensors.  Size should be concatenation of these tensors.
         concatenated_unembeddable_encoders_size = 0
         for i_f in self.unembeddable_features:
-            concatenated_unembeddable_encoders_size += \
-                input_features[i_f].output_shape[0]
+            concatenated_unembeddable_encoders_size += input_features[i_f].output_shape[0]
 
-        self.layer_norm = torch.nn.LayerNorm(
-            concatenated_unembeddable_encoders_size)
+        self.layer_norm = torch.nn.LayerNorm(concatenated_unembeddable_encoders_size)
 
-        logger.debug('  TransformerStack')
+        logger.debug("  TransformerStack")
         self.transformer_stack = TransformerStack(
             input_size=config.hidden_size,
             sequence_size=len(self.embeddable_features),
@@ -813,20 +732,18 @@ class TabTransformerCombiner(Combiner):
             num_heads=config.num_heads,
             fc_size=config.transformer_fc_size,
             num_layers=config.num_layers,
-            dropout=config.dropout
+            dropout=config.dropout,
         )
 
-        logger.debug('  FCStack')
-        transformer_hidden_size = \
-            self.transformer_stack.layers[-1].output_shape[-1]
+        logger.debug("  FCStack")
+        transformer_hidden_size = self.transformer_stack.layers[-1].output_shape[-1]
 
         # determine input size to fully connected layer based on reducer
-        if config.reduce_output == 'concat':
+        if config.reduce_output == "concat":
             num_embeddable_features = len(self.embeddable_features)
             fc_input_size = num_embeddable_features * transformer_hidden_size
         else:
-            fc_input_size = transformer_hidden_size \
-                if len(self.embeddable_features) > 0 else 0
+            fc_input_size = transformer_hidden_size if len(self.embeddable_features) > 0 else 0
         self.fc_stack = FCStack(
             fc_input_size + concatenated_unembeddable_encoders_size,
             layers=config.fc_layers,
@@ -852,46 +769,34 @@ class TabTransformerCombiner(Combiner):
         return self.fc_stack.output_shape
 
     def forward(
-            self,
-            inputs: Dict,  # encoder outputs
+        self,
+        inputs: Dict,  # encoder outputs
     ) -> Dict:
-        unembeddable_encoder_outputs = [inputs[k]['encoder_output'] for k in
-                                        inputs
-                                        if k in self.unembeddable_features]
-        embeddable_encoder_outputs = [inputs[k]['encoder_output'] for k in
-                                      inputs
-                                      if k in self.embeddable_features]
+        unembeddable_encoder_outputs = [inputs[k]["encoder_output"] for k in inputs if k in self.unembeddable_features]
+        embeddable_encoder_outputs = [inputs[k]["encoder_output"] for k in inputs if k in self.embeddable_features]
 
-        batch_size = embeddable_encoder_outputs[0].shape[0] \
-            if len(embeddable_encoder_outputs) > 0 else \
-            unembeddable_encoder_outputs[0].shape[0]
+        batch_size = (
+            embeddable_encoder_outputs[0].shape[0]
+            if len(embeddable_encoder_outputs) > 0
+            else unembeddable_encoder_outputs[0].shape[0]
+        )
 
         # ================ Project & Concat embeddables ================
         if len(embeddable_encoder_outputs) > 0:
 
             # ============== Flatten =================
-            embeddable_encoder_outputs = [
-                torch.reshape(eo, [batch_size, -1]) for eo in
-                embeddable_encoder_outputs
-            ]
+            embeddable_encoder_outputs = [torch.reshape(eo, [batch_size, -1]) for eo in embeddable_encoder_outputs]
 
-            projected = [
-                self.projectors[i](eo)
-                for i, eo in enumerate(embeddable_encoder_outputs)
-            ]
+            projected = [self.projectors[i](eo) for i, eo in enumerate(embeddable_encoder_outputs)]
             hidden = torch.stack(projected)  # num_eo, bs, h
             hidden = torch.permute(hidden, (1, 0, 2))  # bs, num_eo, h
 
             if self.embed_input_feature_name:
-                i_f_names_idcs = torch.reshape(
-                    torch.arange(0, len(embeddable_encoder_outputs)),
-                    [-1, 1]
-                )
+                i_f_names_idcs = torch.reshape(torch.arange(0, len(embeddable_encoder_outputs)), [-1, 1])
                 embedded_i_f_names = self.embed_i_f_name_layer(i_f_names_idcs)
                 embedded_i_f_names = torch.unsqueeze(embedded_i_f_names, dim=0)
-                embedded_i_f_names = torch.tile(embedded_i_f_names,
-                                                [batch_size, 1, 1])
-                if self.embed_input_feature_name == 'add':
+                embedded_i_f_names = torch.tile(embedded_i_f_names, [batch_size, 1, 1])
+                if self.embed_input_feature_name == "add":
                     hidden = hidden + embedded_i_f_names
                 else:
                     hidden = torch.cat([hidden, embedded_i_f_names], -1)
@@ -907,14 +812,10 @@ class TabTransformerCombiner(Combiner):
 
         # ================ Concat Skipped ================
         if len(unembeddable_encoder_outputs) > 0:
-            unembeddable_encoder_outputs = [
-                torch.reshape(eo, [batch_size, -1]) for eo in
-                unembeddable_encoder_outputs
-            ]
+            unembeddable_encoder_outputs = [torch.reshape(eo, [batch_size, -1]) for eo in unembeddable_encoder_outputs]
             # ================ Flatten ================
             if len(unembeddable_encoder_outputs) > 1:
-                unembeddable_hidden = torch.cat(unembeddable_encoder_outputs,
-                                                -1)  # tf.keras.layers.concatenate
+                unembeddable_hidden = torch.cat(unembeddable_encoder_outputs, -1)  # tf.keras.layers.concatenate
             else:
                 unembeddable_hidden = list(unembeddable_encoder_outputs)[0]
             unembeddable_hidden = self.layer_norm(unembeddable_hidden)
@@ -929,11 +830,11 @@ class TabTransformerCombiner(Combiner):
         # ================ FC Layers ================
         hidden = self.fc_stack(hidden)
 
-        return_data = {'combiner_output': hidden}
+        return_data = {"combiner_output": hidden}
 
         if len(inputs) == 1:
             for key, value in [d for d in inputs.values()][0].items():
-                if key != 'encoder_output':
+                if key != "encoder_output":
                     return_data[key] = value
 
         return return_data
@@ -951,28 +852,28 @@ class ComparatorCombinerConfig:
     num_fc_layers: int = schema.NonNegativeInteger(default=1)
     fc_size: int = schema.PositiveInteger(default=256)
     use_bias: bool = True
-    weights_initializer: Union[str, Dict] = schema.InitializerOrDict(default='xavier_uniform')
-    bias_initializer: Union[str, Dict] = schema.InitializerOrDict(default='zeros')
-    norm: Optional[str] = schema.StringOptions(['batch', 'layer'])
+    weights_initializer: Union[str, Dict] = schema.InitializerOrDict(default="xavier_uniform")
+    bias_initializer: Union[str, Dict] = schema.InitializerOrDict(default="zeros")
+    norm: Optional[str] = schema.StringOptions(["batch", "layer"])
     norm_params: Optional[dict] = schema.Dict()
-    activation: str = 'relu'
+    activation: str = "relu"
     dropout: float = schema.FloatRange(default=0.0, min=0, max=1)
 
     class Meta:
         unknown = INCLUDE
 
 
-@register_combiner(name='comparator')
+@register_combiner(name="comparator")
 class ComparatorCombiner(Combiner):
     def __init__(
-            self,
-            input_features: Dict[str, "InputFeature"],
-            config: ComparatorCombinerConfig = None,
-            **kwargs,
+        self,
+        input_features: Dict[str, "InputFeature"],
+        config: ComparatorCombinerConfig = None,
+        **kwargs,
     ):
         super().__init__(input_features)
         self.name = "ComparatorCombiner"
-        logger.debug("Entering {}".format(self.name))
+        logger.debug(f"Entering {self.name}")
 
         self.entity_1 = config.entity_1
         self.entity_2 = config.entity_2
@@ -1017,18 +918,15 @@ class ComparatorCombiner(Combiner):
                 default_dropout=config.dropout,
             )
 
-        self.last_fc_layer_fc_size = fc_layers[-1]['fc_size']
+        self.last_fc_layer_fc_size = fc_layers[-1]["fc_size"]
 
         # todo: set initializer and regularization
         self.bilinear_weights = torch.randn(
-            [self.last_fc_layer_fc_size, self.last_fc_layer_fc_size],
-            dtype=torch.float32
+            [self.last_fc_layer_fc_size, self.last_fc_layer_fc_size], dtype=torch.float32
         )
 
     def get_entity_shape(self, entity: list) -> torch.Size:
-        sizes = [
-            torch.prod(torch.Tensor([*self.input_features[k].output_shape]))
-            for k in entity]
+        sizes = [torch.prod(torch.Tensor([*self.input_features[k].output_shape])) for k in entity]
         return torch.Size([torch.sum(torch.Tensor(sizes)).type(torch.int32)])
 
     @property
@@ -1036,12 +934,11 @@ class ComparatorCombiner(Combiner):
         return torch.Size([2 * self.last_fc_layer_fc_size + 2])
 
     def forward(
-            self,
-            inputs: Dict,  # encoder outputs
+        self,
+        inputs: Dict,  # encoder outputs
     ) -> Dict[str, torch.Tensor]:  # encoder outputs
         if inputs.keys() != self.required_inputs:
-            raise ValueError(
-                f"Missing inputs {self.required_inputs - set(inputs.keys())}")
+            raise ValueError(f"Missing inputs {self.required_inputs - set(inputs.keys())}")
 
         ############
         # Entity 1 #
@@ -1050,9 +947,7 @@ class ComparatorCombiner(Combiner):
 
         # ================ Flatten ================
         batch_size = e1_enc_outputs[0].shape[0]
-        e1_enc_outputs = [
-            torch.reshape(eo, [batch_size, -1]) for eo in e1_enc_outputs
-        ]
+        e1_enc_outputs = [torch.reshape(eo, [batch_size, -1]) for eo in e1_enc_outputs]
 
         # ================ Concat ================
         if len(e1_enc_outputs) > 1:
@@ -1070,9 +965,7 @@ class ComparatorCombiner(Combiner):
 
         # ================ Flatten ================
         batch_size = e2_enc_outputs[0].shape[0]
-        e2_enc_outputs = [
-            torch.reshape(eo, [batch_size, -1]) for eo in e2_enc_outputs
-        ]
+        e2_enc_outputs = [torch.reshape(eo, [batch_size, -1]) for eo in e2_enc_outputs]
 
         # ================ Concat ================
         if len(e2_enc_outputs) > 1:
@@ -1097,18 +990,17 @@ class ComparatorCombiner(Combiner):
         dot_product = torch.sum(element_wise_mul, 1, keepdim=True)  # [bs, 1]
         abs_diff = torch.abs(e1_hidden - e2_hidden)  # [bs, fc_size]
         bilinear_prod = torch.bmm(
-            torch.mm(e1_hidden, self.bilinear_weights).unsqueeze(1),
-            e2_hidden.unsqueeze(-1)
-        ).squeeze(-1)  # [bs, 1]
+            torch.mm(e1_hidden, self.bilinear_weights).unsqueeze(1), e2_hidden.unsqueeze(-1)
+        ).squeeze(
+            -1
+        )  # [bs, 1]
 
         logger.debug(
-            'preparing combiner output by concatenating these tensors: '
-            f'dot_product: {dot_product.shape}, element_size_mul: {element_wise_mul.shape}'
-            f', abs_diff: {abs_diff.shape}, bilinear_prod {bilinear_prod.shape}'
+            "preparing combiner output by concatenating these tensors: "
+            f"dot_product: {dot_product.shape}, element_size_mul: {element_wise_mul.shape}"
+            f", abs_diff: {abs_diff.shape}, bilinear_prod {bilinear_prod.shape}"
         )
-        hidden = torch.cat(
-            [dot_product, element_wise_mul, abs_diff, bilinear_prod], 1
-        )  # [bs, 2 * fc_size + 2]
+        hidden = torch.cat([dot_product, element_wise_mul, abs_diff, bilinear_prod], 1)  # [bs, 2 * fc_size + 2]
 
         return {"combiner_output": hidden}
 
@@ -1118,7 +1010,4 @@ class ComparatorCombiner(Combiner):
 
 
 def get_combiner_class(combiner_type):
-    return get_from_registry(
-        combiner_type,
-        combiner_registry
-    )
+    return get_from_registry(combiner_type, combiner_registry)
