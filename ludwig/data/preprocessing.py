@@ -1161,9 +1161,6 @@ def build_data(input_cols, features, training_set_metadata, backend, skip_save_p
         preprocessing_parameters = training_set_metadata[feature[NAME]][PREPROCESSING]
         handle_missing_values(input_cols, feature, preprocessing_parameters)
         add_feature_data = get_from_registry(feature[TYPE], base_type_registry).add_feature_data
-        if feature[TYPE] == TEXT:
-            print(f"feature[NAME]: {feature[NAME]}")
-            print(f"input_cols: {input_cols}")
         proc_cols = add_feature_data(
             feature,
             input_cols,
