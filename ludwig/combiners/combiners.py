@@ -807,7 +807,7 @@ class TabTransformerCombiner(Combiner):
             # ================ Sequence Reduction ================
             hidden = self.reduce_sequence(hidden)
         else:
-            # create emtpy tensor because there are no cateagory features
+            # create empty tensor because there are no category features
             hidden = torch.empty([batch_size, 0])
 
         # ================ Concat Skipped ================
