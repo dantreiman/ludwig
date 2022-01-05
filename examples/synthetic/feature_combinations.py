@@ -153,7 +153,7 @@ for ri in tqdm.tqdm(range(RUNS)):
             for oi, (out_axis, out_config) in enumerate(OUT_AXES.items()):
                 model_name = f"{opt}_{in_axis}_in_{out_axis}_out"
                 config = make_model_config(in_config, out_config, opt)
-                model = LudwigModel(config=config, logging_level=logging.INFO)
+                model = LudwigModel(config=config, logging_level=logging.ERROR)
 
                 train_stats, _, _ = model.train(
                     training_set=training_set,
