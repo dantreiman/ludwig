@@ -106,7 +106,6 @@ IN_AXES = {
 }
 
 OUT_AXES = {
-    'numeric': [{'name':'c', 'type':'numerical'}],
     'category': [{'name':'e', 'type':'category'}],
     'binary': [{'name':'p', 'type':'binary'}]
 }
@@ -137,9 +136,15 @@ results = {
     'first_train_loss': [],
     'first_test_loss': [],
     'first_validation_loss': [],
+    'first_train_accuracy': [],
+    'first_test_accuracy': [],
+    'first_validation_accuracy': [],
     'final_train_loss': [],
     'final_test_loss': [],
-    'final_validation_loss': []
+    'final_validation_loss': [],
+    'final_train_accuracy': [],
+    'final_test_accuracy': [],
+    'final_validation_accuracy': [],
 }
 
 for ri in tqdm.tqdm(range(RUNS)):
@@ -148,7 +153,7 @@ for ri in tqdm.tqdm(range(RUNS)):
             for oi, (out_axis, out_config) in enumerate(OUT_AXES.items()):
                 model_name = f"{opt}_{in_axis}_in_{out_axis}_out"
                 config = make_model_config(in_config, out_config, opt)
-                model = LudwigModel(config=config, logging_level=logging.ERROR)
+                model = LudwigModel(config=config, logging_level=logging.INFO)
 
                 train_stats, _, _ = model.train(
                     training_set=training_set,
@@ -159,20 +164,28 @@ for ri in tqdm.tqdm(range(RUNS)):
                     output_directory='./results',
                     random_seed=2021
                 )
-                train_loss = train_stats['training']['combined']['loss']
-                test_loss = train_stats['test']['combined']['loss']
-                validation_loss = train_stats['validation']['combined']['loss']
+                # Get metrics for our single output feature.
+                train_metrics = [v for k,v in train_stats['training'].items() if k != 'combined'][0]
+                test_metrics = [v for k,v in train_stats['training'].items() if k != 'combined'][0]
+                validation_metrics = [v for k,v in train_stats['training'].items() if k != 'combined'][0]
+                train_loss = train_metrics['loss']
                 results['run'].append(ri)
                 results['model_name'].append(model_name)
                 results['optimizer'].append(opt)
                 results['in_axis'].append(in_axis)
                 results['out_axis'].append(out_axis)
-                results['first_train_loss'].append(train_loss[0])
-                results['first_test_loss'].append(test_loss[0])
-                results['first_validation_loss'].append(validation_loss[0])
-                results['final_train_loss'].append(train_loss[-1])
-                results['final_test_loss'].append(test_loss[-1])
-                results['final_validation_loss'].append(validation_loss[-1])
+                results['first_train_loss'].append(train_metrics['loss'][0])
+                results['first_test_loss'].append(test_metrics['loss'][0])
+                results['first_validation_loss'].append(validation_metrics['loss'][0])
+                results['first_train_accuracy'].append(train_metrics['accuracy'][0])
+                results['first_test_accuracy'].append(test_metrics['accuracy'][0])
+                results['first_validation_accuracy'].append(validation_metrics['accuracy'][0])
+                results['final_train_loss'].append(train_metrics['loss'][-1])
+                results['final_test_loss'].append(test_metrics['loss'][-1])
+                results['final_validation_loss'].append(validation_metrics['loss'][-1])
+                results['final_train_accuracy'].append(train_metrics['accuracy'][-1])
+                results['final_test_accuracy'].append(test_metrics['accuracy'][-1])
+                results['final_validation_accuracy'].append(validation_metrics['accuracy'][-1])
 
 
 results_df = pd.DataFrame(results)
@@ -180,5 +193,7 @@ results_df.to_csv('feature_combinations_all_runs.csv', index=False)
 
 mean_results_df = results_df[[
     'model_name', 'first_train_loss', 'first_test_loss', 'first_validation_loss',
-    'final_train_loss', 'final_test_loss', 'final_validation_loss']].groupby('model_name').mean()
+    'first_train_accuracy', 'first_test_accuracy', 'first_validation_accuracy',
+    'final_train_loss', 'final_test_loss', 'final_validation_loss',
+    'final_train_accuracy', 'final_test_accuracy', 'final_validation_accuracy']].groupby('model_name').mean()
 mean_results_df.to_csv('feature_combinations_averages.csv', index=True)
