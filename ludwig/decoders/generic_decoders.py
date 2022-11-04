@@ -21,7 +21,13 @@ import torch
 from ludwig.constants import BINARY, CATEGORY, LOSS, NUMBER, SEQUENCE, SET, TEXT, TYPE, VECTOR
 from ludwig.decoders.base import Decoder
 from ludwig.decoders.registry import register_decoder
-from ludwig.schema.decoders.base import ClassifierConfig, PassthroughDecoderConfig, ProjectorConfig, RegressorConfig
+from ludwig.schema.decoders.base import (
+    ClassifierConfig,
+    PassthroughDecoderConfig,
+    PredictorConfig,
+    ProjectorConfig,
+    RegressorConfig,
+)
 from ludwig.utils.torch_utils import Dense, get_activation
 
 logger = logging.getLogger(__name__)
@@ -193,3 +199,63 @@ class Classifier(Decoder):
 
     def forward(self, inputs, **kwargs):
         return self.dense(inputs)
+
+
+@register_decoder("predictor", [CATEGORY])
+class Predictor(Decoder):
+    def __init__(
+        self,
+        input_size,
+        num_classes,
+        use_bias=True,
+        weights_initializer="xavier_uniform",
+        bias_initializer="zeros",
+        decoder_config=None,
+        **kwargs,
+    ):
+        super().__init__()
+        self.config = decoder_config
+        logger.debug(f" {self.name}")
+        self.num_classes = num_classes
+        self.classifier_mode = False  # Set to true to run as classifier.
+
+        # "Fat and shallow" predictor
+        self.pred1 = Dense(
+            input_size=input_size,
+            output_size=1024,
+            use_bias=use_bias,
+            weights_initializer=weights_initializer,
+            bias_initializer=bias_initializer,
+        )
+        self.pred2 = Dense(
+            input_size=1024,
+            output_size=64,  # Embedding size
+            use_bias=use_bias,
+            weights_initializer=weights_initializer,
+            bias_initializer=bias_initializer,
+        )
+
+        self.classifier_head = Dense(
+            input_size=input_size,
+            output_size=num_classes,
+            use_bias=use_bias,
+            weights_initializer=weights_initializer,
+            bias_initializer=bias_initializer,
+        )
+
+    @staticmethod
+    def get_schema_cls():
+        return PredictorConfig
+
+    @property
+    def input_shape(self):
+        return self.pred1.input_shape
+
+    def forward(self, inputs, **kwargs):
+        if self.classifier_mode:
+            return self.classifier_head(inputs)
+        else:
+            predicted_embedding = self.pred1(inputs)
+            predicted_embedding = self.pred2(predicted_embedding)
+            return predicted_embedding
+            # return self.dense(inputs)

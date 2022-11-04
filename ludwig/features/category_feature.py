@@ -406,9 +406,10 @@ class CategoryOutputFeature(CategoryFeatureMixin, OutputFeature):
         metadata,
     ):
         predictions_col = f"{self.feature_name}_{PREDICTIONS}"
-        if predictions_col in predictions:
-            if "idx2str" in metadata:
-                predictions[predictions_col] = predictions[predictions_col].map(lambda pred: metadata["idx2str"][pred])
+        # Hacks: skip postprocessing
+        # if predictions_col in predictions:
+        #     if "idx2str" in metadata:
+        #         predictions[predictions_col] = predictions[predictions_col].map(lambda pred: metadata["idx2str"][pred])
 
         probabilities_col = f"{self.feature_name}_{PROBABILITIES}"
         if probabilities_col in predictions:
