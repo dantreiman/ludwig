@@ -46,8 +46,8 @@ from ludwig.modules.metric_modules import get_improved_fun, get_initial_validati
 from ludwig.modules.optimization_modules import create_clipper, create_optimizer
 from ludwig.progress_bar import LudwigProgressBar
 from ludwig.schema.trainer import ECDTrainerConfig
-from ludwig.trainers.base import BaseTrainer
 from ludwig.trainers.registry import register_trainer
+from ludwig.trainers.trainer import Trainer
 from ludwig.utils import time_utils
 from ludwig.utils.checkpoint_utils import Checkpoint, CheckpointManager
 from ludwig.utils.defaults import default_random_seed
@@ -67,9 +67,9 @@ from ludwig.utils.trainer_utils import (
 logger = logging.getLogger(__name__)
 
 
-@register_trainer(MODEL_ECD, default=False)
-class Trainer(BaseTrainer):
-    """Trainer is a class that trains a model."""
+@register_trainer(MODEL_ECD, default=True)
+class DirectPredTrainer(Trainer):
+    """DirectPredTrainer trains a self-supervised model by tabular data augmentation."""
 
     @staticmethod
     def get_schema_cls():
@@ -214,32 +214,39 @@ class Trainer(BaseTrainer):
             A tuple of the loss tensor and a dictionary of loss for every output feature.
         """
         if isinstance(self.optimizer, torch.optim.LBFGS):
-            # NOTE: Horovod is not supported for L-BFGS.
-
-            def closure():
-                # Allows L-BFGS to reevaluate the loss function
-                self.optimizer.zero_grad()
-                model_outputs = self.model((inputs, targets))
-                loss, all_losses = self.model.train_loss(
-                    targets, model_outputs, self.regularization_type, self.regularization_lambda
-                )
-                loss.backward()
-                return loss
-
-            self.optimizer.step(closure)
-
-            # Obtain model predictions and loss
-            model_outputs = self.model((inputs, targets))
-            loss, all_losses = self.model.train_loss(
-                targets, model_outputs, self.regularization_type, self.regularization_lambda
-            )
-
-            return loss, all_losses
+            assert (False, "Make this work for LBFGS optimizer (maybe)")
+        # if isinstance(self.optimizer, torch.optim.LBFGS):
+        #     # NOTE: Horovod is not supported for L-BFGS.
+        #
+        #     def closure():
+        #         # Allows L-BFGS to reevaluate the loss function
+        #         self.optimizer.zero_grad()
+        #         model_outputs = self.model((inputs, targets))
+        #         loss, all_losses = self.model.train_loss(
+        #             targets, model_outputs, self.regularization_type, self.regularization_lambda
+        #         )
+        #         loss.backward()
+        #         return loss
+        #
+        #     self.optimizer.step(closure)
+        #
+        #     # Obtain model predictions and loss
+        #     model_outputs = self.model((inputs, targets))
+        #     loss, all_losses = self.model.train_loss(
+        #         targets, model_outputs, self.regularization_type, self.regularization_lambda
+        #     )
+        #
+        #     return loss, all_losses
 
         self.optimizer.zero_grad()
 
+        # TODO: create augmented batch
+
         # Obtain model predictions and loss
         model_outputs = self.model((inputs, targets))
+
+        # Compute bootstrap loss
+
         loss, all_losses = self.model.train_loss(
             targets, model_outputs, self.regularization_type, self.regularization_lambda
         )

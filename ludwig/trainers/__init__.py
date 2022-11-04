@@ -1,5 +1,6 @@
 # register trainers
 
+import ludwig.trainers.directpred_trainer  # noqa: F401
 import ludwig.trainers.trainer  # noqa: F401
 
 try:
