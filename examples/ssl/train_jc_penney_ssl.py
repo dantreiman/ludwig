@@ -6,6 +6,7 @@ import yaml
 import ludwig
 from ludwig.api import LudwigModel
 from ludwig.datasets import jc_penney_products
+from ludwig import visualize
 
 print("Loading Dataset")
 df = jc_penney_products.load()
@@ -50,7 +51,7 @@ test_stats, predictions, output_directory = model.evaluate(
     test_df, collect_predictions=True, collect_overall_stats=True
 )
 
-confusion_matrix(
+visualize.confusion_matrix(
     [test_stats],
     model.training_set_metadata,
     "average_product_rating",
@@ -62,6 +63,6 @@ confusion_matrix(
 )
 
 # Visualizes learning curves, which show how performance metrics changed over time during training.
-learning_curves(
+visualize.learning_curves(
     train_stats, output_feature_name="average_product_rating", output_directory="./visualizations", file_format="png"
 )
