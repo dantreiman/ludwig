@@ -92,6 +92,7 @@ class _CategoryPredict(PredictModule):
 
     def forward(self, inputs: Dict[str, torch.Tensor], feature_name: str) -> Dict[str, torch.Tensor]:
         logits = output_feature_utils.get_output_feature_tensor(inputs, feature_name, self.logits_key)
+        projection_input = output_feature_utils.get_output_feature_tensor(inputs, feature_name, PROJECTION_INPUT)
 
         if self.calibration_module is not None:
             probabilities = self.calibration_module(logits)
@@ -105,7 +106,12 @@ class _CategoryPredict(PredictModule):
         # predictions: [batch_size]
         # probabilities: [batch_size, num_classes]
         # logits: [batch_size, num_classes]
-        return {self.predictions_key: predictions, self.probabilities_key: probabilities, self.logits_key: logits}
+        return {
+            self.predictions_key: predictions,
+            self.probabilities_key: probabilities,
+            self.logits_key: logits,
+            PROJECTION_INPUT: projection_input,
+        }
 
 
 class CategoryFeatureMixin(BaseFeatureMixin):

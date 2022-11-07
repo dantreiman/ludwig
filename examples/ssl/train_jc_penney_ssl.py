@@ -38,9 +38,11 @@ output_features:
      decoder:
        type: predictor
 trainer:
-  epochs: 10
-  regularization_lambda: 0.1
+  epochs: 3
+  regularization_lambda: 0.02
   regularization_type: l1
+  optimizer:
+    type: sgd
 """
 
 config_dict = yaml.safe_load(config)
@@ -60,6 +62,24 @@ print("Training Done, Evaluating")
 test_stats, predictions, output_directory = model.evaluate(
     test_df, collect_predictions=True, collect_overall_stats=True
 )
+
+# Write projection inputs to csv.
+learned_embeddings = predictions["average_product_rating_quantized_projection_input"]
+with open("vectors.tsv", "w") as f:
+    for i in range(len(learned_embeddings)):
+        first = True
+        for v in learned_embeddings[i]:
+            if not first:
+                f.write("\t")
+            f.write("%f" % v)
+            first = False
+        f.write("\n")
+
+with open("metadata.tsv", "w") as f:
+    f.write("Brand\tRating\n")
+    for i in range(len(learned_embeddings)):
+        f.write(f"{test_df.brand.iloc[i]}\t{test_df.average_product_rating_quantized.iloc[i]}\n")
+
 
 visualize.confusion_matrix(
     [test_stats],
