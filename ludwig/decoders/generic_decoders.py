@@ -203,6 +203,8 @@ class Classifier(Decoder):
 
 @register_decoder("predictor", [CATEGORY])
 class Predictor(Decoder):
+    """A DirectPred predictor."""
+
     def __init__(
         self,
         input_size,
@@ -219,17 +221,9 @@ class Predictor(Decoder):
         self.num_classes = num_classes
         self.classifier_mode = False  # Set to true to run as classifier.
 
-        # "Fat and shallow" predictor
-        self.pred1 = Dense(
+        self.predictor = Dense(
             input_size=input_size,
-            output_size=1024,
-            use_bias=use_bias,
-            weights_initializer=weights_initializer,
-            bias_initializer=bias_initializer,
-        )
-        self.pred2 = Dense(
-            input_size=1024,
-            output_size=64,  # Embedding size
+            output_size=input_size,  # Embedding size.  Embedding size must match output size of network.
             use_bias=use_bias,
             weights_initializer=weights_initializer,
             bias_initializer=bias_initializer,
@@ -249,13 +243,29 @@ class Predictor(Decoder):
 
     @property
     def input_shape(self):
-        return self.pred1.input_shape
+        return self.predictor.input_shape
+
+    def update_predictor(self, F, eps=0.1):
+        """Updates predictor weights to align eigenvalues.
+
+        F - the correlation matrix of the inputs to this layer (projection)g.
+        """
+        eigval, eigvec = tf.linalg.eigh(F)
+        eigval = tf.math.real(eigval)
+        max_eigval = tf.math.reduce_max(eigval)
+        eigval = tf.divide(eigval, max_eigval)
+        eigval = tf.clip_by_value(eigval, clip_value_min=0, clip_value_max=max_eigval)
+
+        p = tf.math.pow(eigval, 0.5) + eps
+        p = tf.clip_by_value(p, clip_value_min=1e-4, clip_value_max=tf.math.reduce_max(p))
+        p_diag = tf.linalg.diag(p)
+        w = tf.matmul(eigvec, p_diag)
+        w = tf.matmul(w, eigvec, transpose_b=True)
 
     def forward(self, inputs, **kwargs):
         if self.classifier_mode:
             return self.classifier_head(inputs)
         else:
-            predicted_embedding = self.pred1(inputs)
-            predicted_embedding = self.pred2(predicted_embedding)
+            predicted_embedding = self.predictor(inputs)
             return predicted_embedding
             # return self.dense(inputs)
