@@ -1,9 +1,7 @@
 import logging
 
-import pandas as pd
 import yaml
 
-import ludwig
 from ludwig import visualize
 from ludwig.api import LudwigModel
 from ludwig.datasets import jc_penney_products
@@ -38,9 +36,9 @@ output_features:
      decoder:
        type: predictor
 trainer:
-  epochs: 3
+  epochs: 10
   regularization_lambda: 0.02
-  regularization_type: l1
+  regularization_type: l2
   optimizer:
     type: sgd
 """
